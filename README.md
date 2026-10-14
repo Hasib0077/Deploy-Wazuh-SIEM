@@ -27,6 +27,18 @@ Here, we need to config filebeat.yml file.
 
 3rd step: wazuh-manager all components ----->[api]----->[wazuh-dasboard]------>[web browser]
 
+## port number 
+1. wazuh-agnet use ---1514 tcp/udp port 
+For authentication it use ----1515
+For authorization it use------1516
+
+2. File beat use--- 9200/tcp to communicate 
+
+3. wazuh-indexer use----9300 to communicate sub indexer
+
+4. wazuh all componets use---55000/tcp to communicate with dashboard
 
 
- 
+
+# For better Undersatnd
+ [Details of Wazuh](https://ebitx.me/posts/wazuh-engineering-part1-architecture-deployment/)
