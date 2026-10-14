@@ -366,3 +366,589 @@ If initialization or testing fails:
 
 - [Official Wazuh 4.12 — Installing the Wazuh indexer step by step](https://documentation.wazuh.com/4.12/installation-guide/wazuh-indexer/step-by-step.html)
 
+
+# 2.Wazuh Server Node Installation
+
+**Wazuh Version:** 4.12.0  
+**Components:** Wazuh Manager, Filebeat  
+**Reference:** [Official Wazuh Documentation — Step-by-Step Installation](https://documentation.wazuh.com/4.12/installation-guide/wazuh-server/step-by-step.html)
+
+## 1. Add the Wazuh Repository
+
+Install the required packages:
+
+```bash
+sudo apt-get install gnupg apt-transport-https
+```
+
+Import the Wazuh GPG key:
+
+```bash
+curl -s https://packages.wazuh.com/key/GPG-KEY-WAZUH | sudo gpg --no-default-keyring --keyring gnupg-ring:/usr/share/keyrings/wazuh.gpg --import
+sudo chmod 644 /usr/share/keyrings/wazuh.gpg
+```
+
+Add the repository:
+
+```bash
+echo "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main" | sudo tee -a /etc/apt/sources.list.d/wazuh.list
+```
+
+Update package information:
+
+```bash
+sudo apt-get update
+```
+
+> If the Wazuh repository is already configured and enabled on the same host, do not add it again.
+
+## 2. Install Wazuh Manager and Filebeat
+
+Install Wazuh Manager:
+
+```bash
+sudo apt-get -y install wazuh-manager=4.12.0-1
+```
+
+Install Filebeat:
+
+```bash
+sudo apt-get -y install filebeat=7.10.2-1
+```
+
+## 3. Configure Filebeat
+
+Download the Wazuh Filebeat configuration:
+
+```bash
+sudo curl -so /etc/filebeat/filebeat.yml https://packages.wazuh.com/4.12/tpl/wazuh/filebeat/filebeat.yml
+```
+
+Edit the configuration:
+
+```bash
+sudo nano /etc/filebeat/filebeat.yml
+```
+
+Configure the Wazuh Indexer address:
+
+```yaml
+output.elasticsearch:
+  hosts: ["192.168.0.107:9200"]  [Replace with ur ip]
+  protocol: https
+  username: ${username}
+  password: ${password}
+```
+
+Replace `<WAZUH_INDEXER_IP>` with the actual Indexer IP address. Preserve the rest of the downloaded configuration.
+
+## 4. Configure the Filebeat Keystore
+
+Create the keystore:
+
+```bash
+sudo filebeat keystore create
+```
+
+Add the Indexer credentials:
+
+```bash
+echo admin | sudo filebeat keystore add username --stdin --force
+echo admin | sudo filebeat keystore add password --stdin --force
+```
+
+> `admin:admin` is the default example credential in the step-by-step documentation. Use your actual configured credentials if they have been changed.
+
+## 5. Install the Wazuh Alerts Template and Module
+
+Download the alerts template:
+
+```bash
+sudo curl -so /etc/filebeat/wazuh-template.json https://raw.githubusercontent.com/wazuh/wazuh/v4.12.0/extensions/elasticsearch/7.x/wazuh-template.json
+sudo chmod go+r /etc/filebeat/wazuh-template.json
+```
+
+Install the Wazuh Filebeat module:
+
+```bash
+curl -s https://packages.wazuh.com/4.x/filebeat/wazuh-filebeat-0.4.tar.gz | sudo tar -xvz -C /usr/share/filebeat/module
+```
+
+## 6. Deploy Filebeat Certificates
+
+Ensure that `wazuh-certificates.tar`, generated during the initial configuration, is available in your working directory.
+
+Set the certificate name used in `config.yml`:
+
+```bash
+NODE_NAME=wazuh-1 [check  cat config.tml ]
+```
+
+Create the certificate directory:
+
+```bash
+sudo mkdir -p /etc/filebeat/certs
+```
+
+Extract the required certificates:
+
+```bash
+sudo tar -xf ./wazuh-certificates.tar -C /etc/filebeat/certs/ ./$NODE_NAME.pem ./$NODE_NAME-key.pem ./root-ca.pem
+```
+
+Rename the certificates:
+
+```bash
+sudo mv -n /etc/filebeat/certs/$NODE_NAME.pem /etc/filebeat/certs/filebeat.pem
+sudo mv -n /etc/filebeat/certs/$NODE_NAME-key.pem /etc/filebeat/certs/filebeat-key.pem
+```
+
+Set the recommended permissions and ownership:
+
+```bash
+sudo chmod 500 /etc/filebeat/certs
+sudo chmod 400 /etc/filebeat/certs/*
+sudo chown -R root:root /etc/filebeat/certs
+```
+
+**Important:** Replace `<SERVER_NODE_NAME>` with the exact server node certificate name. Check that the expected files exist before proceeding.
+
+## 7. Configure the Wazuh Indexer Connection
+
+This step is required if you want to use the Wazuh vulnerability detection capability.
+
+Store the Indexer credentials in the Wazuh Manager keystore:
+
+```bash
+echo 'admin' | sudo /var/ossec/bin/wazuh-keystore -f indexer -k username
+echo 'admin' | sudo /var/ossec/bin/wazuh-keystore -f indexer -k password
+```
+-admin:admin username and password [ u can change it]
+Edit the Manager configuration:
+
+```bash
+sudo nano /var/ossec/etc/ossec.conf
+```
+
+Configure the `<indexer>` section to use the actual Indexer address and the Filebeat certificate files:
+
+```xml
+<indexer>
+  <enabled>yes</enabled>
+  <hosts>
+    <host>https://192.168.0.107:9200</host> [Replace with ur indexer ip]
+  </hosts>
+  <ssl>
+    <certificate_authorities>
+      <ca>/etc/filebeat/certs/root-ca.pem</ca>
+    </certificate_authorities>
+    <certificate>/etc/filebeat/certs/filebeat.pem</certificate>
+    <key>/etc/filebeat/certs/filebeat-key.pem</key>
+  </ssl>
+</indexer>
+```
+
+Replace `<WAZUH_INDEXER_IP>` with the actual Indexer IP or hostname. Ensure that the certificate paths match the files deployed in the previous step.
+
+For multiple Indexer nodes, add a `<host>` entry for each node.
+
+## 8. Start the Wazuh Manager
+
+Enable and start the service:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable wazuh-manager
+sudo systemctl start wazuh-manager
+```
+
+Verify its status:
+
+```bash
+sudo systemctl status wazuh-manager --no-pager
+```
+
+## 9. Start Filebeat
+
+Enable and start Filebeat:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable filebeat
+sudo systemctl start filebeat
+```
+
+Test the Indexer connection:
+
+```bash
+sudo filebeat test output
+```
+
+A successful connection should report that the connection and TLS handshake succeeded and show the Filebeat output version.
+
+## 10. Disable Wazuh Repository Updates
+
+Only after completing the installation of **all required Wazuh components**, disable the repository to prevent accidental upgrades:
+
+```bash
+sudo sed -i "s/^deb /#deb /" /etc/apt/sources.list.d/wazuh.list
+sudo apt update
+```
+
+## 11. Troubleshooting
+
+Check the Wazuh Manager:
+
+```bash
+sudo systemctl status wazuh-manager --no-pager
+sudo journalctl -u wazuh-manager -n 50 --no-pager
+```
+
+Check Filebeat:
+
+```bash
+sudo systemctl status filebeat --no-pager
+sudo journalctl -u filebeat -n 50 --no-pager
+sudo filebeat test output
+```
+
+---
+
+# Wazuh Server Cluster Configuration
+
+> This section applies to **multi-node deployments**. A single-node lab does not need a master/worker cluster.
+
+## 12. Configure the Master Node
+
+Edit the Wazuh Manager configuration:
+
+```bash
+sudo nano /var/ossec/etc/ossec.conf
+```
+
+Configure the `<cluster>` section:
+
+```xml
+<cluster>
+  <name>wazuh</name>
+  <node_name>master-node</node_name>
+  <node_type>master</node_type>
+  <key>REPLACE_WITH_32_CHARACTER_CLUSTER_KEY</key>
+  <port>1516</port>
+  <bind_addr>0.0.0.0</bind_addr>
+  <nodes>
+    <node><WAZUH_MASTER_ADDRESS></node>
+  </nodes>
+  <hidden>no</hidden>
+  <disabled>no</disabled>
+</cluster>
+```
+
+Generate a cluster key:
+
+```bash
+openssl rand -hex 16
+```
+
+Use the same generated key on every node. Replace `<WAZUH_MASTER_ADDRESS>` with the master node's actual IP address or DNS name.
+
+Restart the Manager:
+
+```bash
+sudo systemctl restart wazuh-manager
+```
+
+## 13. Configure Worker Nodes
+
+On each worker, edit:
+
+```bash
+sudo nano /var/ossec/etc/ossec.conf
+```
+
+Configure its `<cluster>` section:
+
+```xml
+<cluster>
+  <name>wazuh</name>
+  <node_name>worker-node</node_name>
+  <node_type>worker</node_type>
+  <key>REPLACE_WITH_32_CHARACTER_CLUSTER_KEY</key>
+  <port>1516</port>
+  <bind_addr>0.0.0.0</bind_addr>
+  <nodes>
+    <node><WAZUH_MASTER_ADDRESS></node>
+  </nodes>
+  <hidden>no</hidden>
+  <disabled>no</disabled>
+</cluster>
+```
+
+Use a unique `node_name` for every worker. Use the same cluster key as the master and specify the master's address.
+
+Restart the Manager on each worker:
+
+```bash
+sudo systemctl restart wazuh-manager
+```
+
+## 14. Verify the Cluster
+
+Run on a Wazuh server node:
+
+```bash
+sudo /var/ossec/bin/cluster_control -l
+```
+
+The output should list the connected master and worker nodes, their roles, versions, and addresses.
+
+**Security notes:**
+- Do not commit passwords, private keys, or `wazuh-certificates.tar` to a public GitHub repository.
+- Use real IP addresses and node names only in private configuration files, not as assumed example values.
+- Open the required network ports between components according to the official Wazuh documentation.
+
+
+# 3.Wazuh Dashboard Installation
+
+**Wazuh Version:** 4.12.0  
+**Package:** `wazuh-dashboard=4.12.0-1`  
+**Reference:** [Official Wazuh Dashboard Installation Documentation](https://documentation.wazuh.com/4.12/installation-guide/wazuh-dashboard/step-by-step.html)
+
+## 1. Install Dependencies
+
+```bash
+sudo apt-get install debhelper tar curl libcap2-bin
+```
+
+Install the repository dependencies if they are missing:
+
+```bash
+sudo apt-get install gnupg apt-transport-https
+```
+
+## 2. Add the Wazuh Repository
+
+Import the GPG key:
+
+```bash
+curl -s https://packages.wazuh.com/key/GPG-KEY-WAZUH | sudo gpg --no-default-keyring --keyring gnupg-ring:/usr/share/keyrings/wazuh.gpg --import
+sudo chmod 644 /usr/share/keyrings/wazuh.gpg
+```
+
+Add the repository:
+
+```bash
+echo "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main" | sudo tee -a /etc/apt/sources.list.d/wazuh.list
+```
+
+Update the package information:
+
+```bash
+sudo apt-get update
+```
+
+> If the Wazuh repository is already configured and enabled on this host, do not add it again.
+
+## 3. Install the Wazuh Dashboard
+
+```bash
+sudo apt-get -y install wazuh-dashboard=4.12.0-1
+```
+
+Verify the installed package version:
+
+```bash
+dpkg-query -W -f='${Version}\n' wazuh-dashboard
+```
+
+## 4. Configure the Dashboard
+
+Open the configuration file:
+
+```bash
+sudo nano /etc/wazuh-dashboard/opensearch_dashboards.yml
+```
+
+Configure the relevant settings:
+
+```yaml
+server.host: 0.0.0.0 [ listen all the ip]
+server.port: 443
+opensearch.hosts: ["https://192.168.0.107:9200"] [ Replace with indexer ip]
+opensearch.ssl.verificationMode: certificate
+```
+
+Replace `<WAZUH_INDEXER_IP>` with the actual IP address or hostname of the Wazuh Indexer.
+
+**Important:** Preserve the other existing settings in the file. Do not replace the entire configuration with this snippet. Confirm that the configured Indexer address matches the deployed certificates and network setup.
+
+## 5. Deploy Dashboard Certificates
+
+Ensure that `wazuh-certificates.tar`, generated during the initial configuration, is available in your working directory.
+
+Set the dashboard certificate name used in `config.yml`:
+
+```bash
+NODE_NAME=dashboard [ check config.yml ]
+```
+
+Create the certificate directory:
+
+```bash
+sudo mkdir -p /etc/wazuh-dashboard/certs
+```
+
+Extract the required certificates:
+
+```bash
+sudo tar -xf ./wazuh-certificates.tar -C /etc/wazuh-dashboard/certs/ ./$NODE_NAME.pem ./$NODE_NAME-key.pem ./root-ca.pem
+```
+
+Rename the certificate files:
+
+```bash
+sudo mv -n /etc/wazuh-dashboard/certs/$NODE_NAME.pem /etc/wazuh-dashboard/certs/dashboard.pem
+sudo mv -n /etc/wazuh-dashboard/certs/$NODE_NAME-key.pem /etc/wazuh-dashboard/certs/dashboard-key.pem
+```
+
+Set permissions and ownership:
+
+```bash
+sudo chmod 500 /etc/wazuh-dashboard/certs
+sudo chmod 400 /etc/wazuh-dashboard/certs/*
+sudo chown -R wazuh-dashboard:wazuh-dashboard /etc/wazuh-dashboard/certs
+```
+
+Check the files before proceeding:
+
+```bash
+sudo ls -l /etc/wazuh-dashboard/certs/
+```
+
+Expected files:
+
+- `dashboard.pem`
+- `dashboard-key.pem`
+- `root-ca.pem`
+
+> **Caution:** The `mv -n` command does not overwrite an existing destination file. If a rename does not happen, inspect the directory before taking further action. Do not delete or move existing certificates blindly.
+
+## 6. Start the Dashboard Service
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable wazuh-dashboard
+sudo systemctl start wazuh-dashboard
+```
+
+Check the service status:
+
+```bash
+sudo systemctl status wazuh-dashboard --no-pager
+```
+
+Check recent logs if necessary:
+
+```bash
+sudo journalctl -u wazuh-dashboard -n 50 --no-pager
+```
+
+## 7. Configure the Wazuh API Connection
+
+Edit the Wazuh dashboard configuration:
+
+```bash
+sudo nano /usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml
+```
+
+Configure the Wazuh server master node address:
+
+```yaml
+hosts:
+  - default:
+      url: https://192.168.0.107 [ Replace with server ip]
+      port: 55000
+      username: wazuh-wui
+      password: <WAZUH_WUI_PASSWORD>
+      run_as: false
+```
+
+Replace the server address and password with the actual configured values.
+
+> The default `wazuh-wui` credentials shown in the official installation guide are examples. If the password has been changed, update this configuration accordingly.
+
+## 8. Access the Wazuh Dashboard
+
+Open the dashboard in a browser:
+
+```text
+https://192.168.0.107 [ Replace with dashboard ip]
+```
+
+The default step-by-step installation credentials are:
+
+- **Username:** `admin`
+- **Password:** `admin`
+
+Use these credentials only if they have not been changed.
+
+The browser may warn that the certificate is not issued by a trusted authority. For a lab, you can verify the certificate and configure trust for the generated root CA. Do not ignore certificate errors without checking the certificate and endpoint.
+
+## 9. Secure the Installation
+
+After confirming the central components work, change the default credentials according to the official Wazuh password-management documentation.
+
+For an all-in-one deployment, the documented password tool is:
+
+```bash
+sudo /usr/share/wazuh-indexer/plugins/opensearch-security/tools/wazuh-passwords-tool.sh --api --change-all --admin-user wazuh --admin-password wazuh
+```
+
+**Important security notes:**
+
+- Use appropriate administrative credentials for your installation.
+- The command above uses example administrative credentials; do not treat `wazuh:wazuh` as a secure production password.
+- Password changes can require updates to the dashboard, Filebeat, and other components.
+- Store generated passwords securely. Never commit credentials to GitHub.
+
+## 10. Disable Wazuh Repository Updates
+
+Only after installing all required Wazuh components, disable the repository to avoid accidental upgrades:
+
+```bash
+sudo sed -i "s/^deb /#deb /" /etc/apt/sources.list.d/wazuh.list
+sudo apt update
+```
+
+## 11. Troubleshooting
+
+Check the service:
+
+```bash
+sudo systemctl status wazuh-dashboard --no-pager
+```
+
+Inspect recent logs:
+
+```bash
+sudo journalctl -u wazuh-dashboard -n 100 --no-pager
+```
+
+Check the Indexer endpoint:
+
+```bash
+curl -k -u admin https://<WAZUH_INDEXER_IP>:9200
+```
+
+The command prompts for the password instead of placing it directly in the command line.
+
+Common issues include:
+
+- **HTTP 500:** Inspect dashboard logs for the underlying error.
+- **Authentication errors:** Verify the Indexer credentials and dashboard configuration.
+- **SSL or certificate errors:** Check certificate paths, permissions, trust configuration, and hostname/IP compatibility.
+- **Connection refused or timeout:** Verify that the Indexer is running, the address is correct, and required network ports are reachable.
+
+---
+
+
