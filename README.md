@@ -12,7 +12,7 @@ it is a opensource. To be honest it is not a replacement of enterprise tools.
 - 3. Security Configuration Assessment (SCA)
 - 4. Vulnerability Detection
 - 5. Active Response (Automation)
-- 6.SIEM & Log Analytics
+- 6. SIEM & Log Analytics
 
 ## Wazuh Architecture Overview & Data Flow
 [wazuh agent] ------> [wazuh manager/server]------>[wazuh-indexer]------->[wazuh-dasboard]
